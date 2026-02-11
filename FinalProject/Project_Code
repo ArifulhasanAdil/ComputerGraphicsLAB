@@ -1,0 +1,1347 @@
+#include <GL/glut.h>
+#include <bits/stdc++.h>
+using namespace std;
+
+// ahanaf - Environment Structures, 3D Objects, Camera, Integration
+
+struct Tree {
+    float x, y, z;
+    float height;
+    float trunkRadius;
+    float foliageRadius;
+    float swayOffset;
+    float r, g, b;
+};
+
+struct Cloud {
+    float x, y, z;
+    float width, height, depth;
+    float speed;
+    float r, g, b, alpha;
+};
+
+struct House {
+    float x, y, z;
+    float width, height, depth;
+    float roofHeight;
+    const char* ownerName;
+};
+
+vector<Tree> trees;
+vector<Cloud> clouds;
+vector<House> houses;
+
+float cameraAngle = 45.0f;
+float cameraHeight = 15.0f;
+float cameraDistance = 40.0f;
+
+const int NUM_TREES = 20;
+const int NUM_CLOUDS = 12;
+const int NUM_HOUSES = 6;
+
+void drawSphere(float radius, int slices, int stacks) {
+    for (int i = 0; i < stacks; i++) {
+        float lat0 = 3.14159f * (-0.5f + (float)i / stacks);
+        float z0 = radius * sinf(lat0);
+        float zr0 = radius * cosf(lat0);
+
+        float lat1 = 3.14159f * (-0.5f + (float)(i + 1) / stacks);
+        float z1 = radius * sinf(lat1);
+        float zr1 = radius * cosf(lat1);
+
+        glBegin(GL_QUAD_STRIP);
+        for (int j = 0; j <= slices; j++) {
+            float lng = 2 * 3.14159f * (float)j / slices;
+            float x = cosf(lng);
+            float y = sinf(lng);
+            glVertex3f(x * zr0, y * zr0, z0);
+            glVertex3f(x * zr1, y * zr1, z1);
+        }
+        glEnd();
+    }
+}
+
+
+enum WeatherType {
+    SUNNY = 0,
+    RAINY = 1,
+    STORM = 2,
+    WINTER = 3,
+    FOG = 4
+};
+
+float lerp(float a, float b, float t);
+
+void drawGround();
+void drawSky();
+void drawSun();
+void drawTree(Tree& tree);
+void drawCloud(Cloud& cloud);
+void drawHouse(House& house);
+void drawPath();
+void drawEnvironment();
+void initEnvironment();
+void updateCamera();
+
+
+
+// adil - Weather Particle Systems (Rain, Snow, Fog, Lightning)
+
+struct Raindrop {
+    float x, y, z;
+    float velocityY;
+    float length;
+    float alpha;
+};
+
+struct Snowflake {
+    float x, y, z;
+    float velocityY;
+    float rotation;
+    float rotationSpeed;
+    float size;
+    float driftX;
+};
+
+struct Lightning {
+    bool active;
+    float duration;
+    float x1, y1, x1_2, y1_2;
+    float x2, y2, x2_2, y2_2;
+    float intensity;
+    int segments;
+    float points[20][2];
+};
+
+struct FogParticle {
+    float x, y, z;
+    float velocityX;
+    float alpha;
+    float size;
+};
+
+vector<Raindrop> raindrops;
+vector<Snowflake> snowflakes;
+vector<FogParticle> fogParticles;
+Lightning lightning;
+
+const int MAX_RAINDROPS = 500;
+const int MAX_SNOWFLAKES = 300;
+const int MAX_FOG_PARTICLES = 100;
+
+float thunderTimer = 0.0f;
+float nextThunderTime = 3.0f;
+
+void drawRain();
+void drawSnow();
+void drawLightning();
+void drawFogEffect();
+void updateRain();
+void updateSnow();
+void updateLightning();
+void updateFog();
+
+
+
+// avishek - User Interface, Buttons, Animation System, Event Handling
+
+
+struct AnimatedElement {
+    float windStrength;
+    float windDirection;
+    float timeScale;
+};
+
+struct UIButton {
+    float x, y, width, height;
+    const char* label;
+    WeatherType weather;
+    bool hovered;
+};
+
+vector<UIButton> uiButtons;
+AnimatedElement animation;
+
+bool showUI = true;
+bool showTeamNames = true;
+bool showSplashScreen = true;
+float splashAlpha = 1.0f;
+int mouseX = 0, mouseY = 0;
+bool isDragging = false;
+int lastMouseX = 0, lastMouseY = 0;
+
+void drawText(float x, float y, const char* text, void* font = GLUT_BITMAP_HELVETICA_12);
+void drawSplashScreen();
+void drawUI();
+void updateAnimations();
+void keyboard(unsigned char key, int x, int y);
+void specialKeys(int key, int x, int y);
+void mouse(int button, int state, int x, int y);
+void motion(int x, int y);
+
+
+
+// irtisum - Dynamic Lighting System, Day/Night Cycle, Sun/Moon Rendering
+
+
+struct LightingState {
+    float ambientR, ambientG, ambientB;
+    float diffuseR, diffuseG, diffuseB;
+    float sunPosX, sunPosY, sunPosZ;
+    float skyR, skyG, skyB;
+    float groundR, groundG, groundB;
+    float fogDensity;
+};
+
+LightingState currentLighting;
+LightingState targetLighting;
+
+bool isDayTime = true;
+float timeOfDay = 0.5f;
+
+LightingState getSunnyLighting();
+LightingState getRainyLighting();
+LightingState getStormLighting();
+LightingState getWinterLighting();
+LightingState getFogLighting();
+void setupLighting();
+
+// SHARED GLOBAL VARIABLES
+
+
+WeatherType currentWeather = SUNNY;
+WeatherType targetWeather = SUNNY;
+float weatherTransition = 1.0f;
+float globalTime = 0.0f;
+
+
+
+// ahanaf - Environment Rendering, 3D Objects, Camera System
+
+float lerp(float a, float b, float t) {
+    return a + (b - a) * t;
+}
+
+void drawGround() {
+    glPushMatrix();
+    float r = lerp(currentLighting.groundR, targetLighting.groundR, weatherTransition);
+    float g = lerp(currentLighting.groundG, targetLighting.groundG, weatherTransition);
+    float b = lerp(currentLighting.groundB, targetLighting.groundB, weatherTransition);
+
+    glColor3f(r, g, b);
+    glBegin(GL_QUADS);
+    glNormal3f(0, 1, 0);
+    glVertex3f(-100, 0, -100);
+    glVertex3f(100, 0, -100);
+    glVertex3f(100, 0, 100);
+    glVertex3f(-100, 0, 100);
+    glEnd();
+
+    glColor3f(r * 0.8f, g * 0.8f, b * 0.8f);
+    glBegin(GL_LINES);
+    for (float i = -100; i <= 100; i += 10) {
+        glVertex3f(i, 0.01f, -100);
+        glVertex3f(i, 0.01f, 100);
+        glVertex3f(-100, 0.01f, i);
+        glVertex3f(100, 0.01f, i);
+    }
+    glEnd();
+    glPopMatrix();
+}
+
+void drawSky() {
+    glDisable(GL_LIGHTING);
+    glPushMatrix();
+    float r = lerp(currentLighting.skyR, targetLighting.skyR, weatherTransition);
+    float g = lerp(currentLighting.skyG, targetLighting.skyG, weatherTransition);
+    float b = lerp(currentLighting.skyB, targetLighting.skyB, weatherTransition);
+    glColor3f(r, g, b);
+    glTranslatef(0, 0, 0);
+    glRotatef(-90, 1, 0, 0);
+    drawSphere(80.0f, 20, 10);
+    glPopMatrix();
+    glEnable(GL_LIGHTING);
+}
+
+void drawSun() {
+    if (currentWeather == SUNNY || (targetWeather == SUNNY && weatherTransition < 0.5f)) {
+        glDisable(GL_LIGHTING);
+        glPushMatrix();
+        float alpha = (currentWeather == SUNNY) ? 1.0f : (1.0f - weatherTransition * 2);
+        float sunHeight = isDayTime ? (20.0f + 30.0f * sinf(timeOfDay * 3.14159f)) : -10.0f;
+        float sunX = 30.0f * cosf((timeOfDay - 0.5f) * 3.14159f);
+        glTranslatef(sunX, sunHeight, -30);
+
+        if (!isDayTime) {
+            glColor4f(0.9f, 0.9f, 1.0f, alpha);
+            glutSolidSphere(2.5f, 20, 20);
+        } else if (timeOfDay < 0.25f || timeOfDay > 0.75f) {
+            glColor4f(1.0f, 0.5f + 0.3f * sinf(timeOfDay * 3.14159f), 0.2f, alpha);
+            glutSolidSphere(3.5f, 20, 20);
+        } else {
+            glColor4f(1.0f, 1.0f, 0.0f, alpha);
+            glutSolidSphere(3.0f, 20, 20);
+        }
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+        if (!isDayTime) {
+            glColor4f(0.7f, 0.7f, 0.9f, alpha * 0.2f);
+        } else if (timeOfDay < 0.25f || timeOfDay > 0.75f) {
+            glColor4f(1.0f, 0.6f, 0.3f, alpha * 0.3f);
+        } else {
+            glColor4f(1.0f, 1.0f, 0.6f, alpha * 0.3f);
+        }
+        glutSolidSphere(5.0f, 20, 20);
+        glDisable(GL_BLEND);
+        glPopMatrix();
+        glEnable(GL_LIGHTING);
+    }
+}
+
+void drawTree(Tree& tree) {
+    glPushMatrix();
+    glTranslatef(tree.x, tree.y, tree.z);
+    float sway = sinf(globalTime * animation.windStrength + tree.swayOffset) * 2.0f * animation.windStrength;
+    glRotatef(sway, 0, 0, 1);
+    glColor3f(0.4f, 0.25f, 0.1f);
+    glPushMatrix();
+    glRotatef(-90, 1, 0, 0);
+    GLUquadric* quad = gluNewQuadric();
+    gluCylinder(quad, tree.trunkRadius, tree.trunkRadius * 0.7f, tree.height * 0.6f, 10, 10);
+    gluDeleteQuadric(quad);
+    glPopMatrix();
+    glTranslatef(0, tree.height * 0.6f, 0);
+    glColor3f(tree.r, tree.g, tree.b);
+    glutSolidSphere(tree.foliageRadius, 12, 12);
+    glPopMatrix();
+}
+
+void drawCloud(Cloud& cloud) {
+    glDisable(GL_LIGHTING);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glPushMatrix();
+    glTranslatef(cloud.x, cloud.y, cloud.z);
+    glColor4f(cloud.r, cloud.g, cloud.b, cloud.alpha);
+    glutSolidSphere(cloud.width, 10, 10);
+    glTranslatef(cloud.width * 0.7f, 0, 0);
+    glutSolidSphere(cloud.width * 0.8f, 10, 10);
+    glTranslatef(-cloud.width * 1.4f, 0, 0);
+    glutSolidSphere(cloud.width * 0.7f, 10, 10);
+    glTranslatef(cloud.width * 0.7f, cloud.height * 0.3f, 0);
+    glutSolidSphere(cloud.width * 0.6f, 10, 10);
+    glPopMatrix();
+    glDisable(GL_BLEND);
+    glEnable(GL_LIGHTING);
+}
+
+void drawHouse(House& house) {
+    glPushMatrix();
+    glTranslatef(house.x, house.y, house.z);
+    glColor3f(0.8f, 0.7f, 0.6f);
+    glPushMatrix();
+    glTranslatef(0, house.height/2, 0);
+    glScalef(house.width, house.height, house.depth);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    glColor3f(0.6f, 0.2f, 0.1f);
+    glBegin(GL_TRIANGLES);
+    glNormal3f(0, 0.7f, 0.7f);
+    glVertex3f(-house.width/2, house.height, house.depth/2);
+    glVertex3f(house.width/2, house.height, house.depth/2);
+    glVertex3f(0, house.height + house.roofHeight, 0);
+    glNormal3f(0, 0.7f, -0.7f);
+    glVertex3f(-house.width/2, house.height, -house.depth/2);
+    glVertex3f(0, house.height + house.roofHeight, 0);
+    glVertex3f(house.width/2, house.height, -house.depth/2);
+    glNormal3f(-0.7f, 0.7f, 0);
+    glVertex3f(-house.width/2, house.height, -house.depth/2);
+    glVertex3f(-house.width/2, house.height, house.depth/2);
+    glVertex3f(0, house.height + house.roofHeight, 0);
+    glNormal3f(0.7f, 0.7f, 0);
+    glVertex3f(house.width/2, house.height, house.depth/2);
+    glVertex3f(house.width/2, house.height, -house.depth/2);
+    glVertex3f(0, house.height + house.roofHeight, 0);
+    glEnd();
+
+    glColor3f(0.3f, 0.2f, 0.1f);
+    glPushMatrix();
+    glTranslatef(0, house.height * 0.3f, house.depth/2 + 0.01f);
+    glScalef(house.width * 0.3f, house.height * 0.6f, 0.01f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    glColor3f(0.6f, 0.8f, 1.0f);
+    for (int i = -1; i <= 1; i += 2) {
+        glPushMatrix();
+        glTranslatef(i * house.width * 0.25f, house.height * 0.6f, house.depth/2 + 0.01f);
+        glScalef(house.width * 0.2f, house.height * 0.25f, 0.01f);
+        glutSolidCube(1.0);
+        glPopMatrix();
+    }
+
+    glDisable(GL_LIGHTING);
+    glPushMatrix();
+    glTranslatef(0, house.height + house.roofHeight + 2.0f, 0);
+    glRotatef(cameraAngle, 0, 1, 0);
+    float nameLen = strlen(house.ownerName) * 0.5f;
+    glLineWidth(4.0f);
+    glColor3f(0.0f, 0.0f, 0.0f);
+    for (float dx = -0.012f; dx <= 0.012f; dx += 0.012f) {
+        for (float dy = -0.012f; dy <= 0.012f; dy += 0.012f) {
+            if (dx != 0 || dy != 0) {
+                glPushMatrix();
+                glTranslatef(-nameLen * 0.8f + dx, -0.3f + dy, 0.0f);
+                glScalef(0.008f, 0.008f, 0.008f);
+                for (const char* c = house.ownerName; *c != '\0'; c++) {
+                    glutStrokeCharacter(GLUT_STROKE_ROMAN, *c);
+                }
+                glPopMatrix();
+            }
+        }
+    }
+    glLineWidth(3.0f);
+    glColor3f(1.0f, 0.95f, 0.2f);
+    glTranslatef(-nameLen * 0.8f, -0.3f, 0.01f);
+    glScalef(0.008f, 0.008f, 0.008f);
+    for (const char* c = house.ownerName; *c != '\0'; c++) {
+        glutStrokeCharacter(GLUT_STROKE_ROMAN, *c);
+    }
+    glPopMatrix();
+    glLineWidth(1.0f);
+    glEnable(GL_LIGHTING);
+    glPopMatrix();
+}
+
+void drawPath() {
+    glPushMatrix();
+    glDisable(GL_LIGHTING);
+    glColor3f(0.4f, 0.4f, 0.45f);
+    glBegin(GL_QUADS);
+    glNormal3f(0, 1, 0);
+    glVertex3f(-3, 0.05f, -100);
+    glVertex3f(3, 0.05f, -100);
+    glVertex3f(3, 0.05f, 100);
+    glVertex3f(-3, 0.05f, 100);
+    glEnd();
+    glColor3f(0.3f, 0.3f, 0.35f);
+    glBegin(GL_QUADS);
+    glVertex3f(-3.2f, 0.06f, -100);
+    glVertex3f(-3.0f, 0.06f, -100);
+    glVertex3f(-3.0f, 0.06f, 100);
+    glVertex3f(-3.2f, 0.06f, 100);
+    glVertex3f(3.0f, 0.06f, -100);
+    glVertex3f(3.2f, 0.06f, -100);
+    glVertex3f(3.2f, 0.06f, 100);
+    glVertex3f(3.0f, 0.06f, 100);
+    glEnd();
+    glColor3f(0.5f, 0.5f, 0.55f);
+    for (float z = -100; z < 100; z += 8) {
+        glBegin(GL_QUADS);
+        glVertex3f(-2.8f, 0.07f, z);
+        glVertex3f(2.8f, 0.07f, z);
+        glVertex3f(2.8f, 0.07f, z + 0.3f);
+        glVertex3f(-2.8f, 0.07f, z + 0.3f);
+        glEnd();
+    }
+    glColor3f(0.6f, 0.6f, 0.65f);
+    for (float z = -100; z < 100; z += 5) {
+        glBegin(GL_QUADS);
+        glVertex3f(-0.1f, 0.08f, z);
+        glVertex3f(0.1f, 0.08f, z);
+        glVertex3f(0.1f, 0.08f, z + 2.5f);
+        glVertex3f(-0.1f, 0.08f, z + 2.5f);
+        glEnd();
+    }
+    glEnable(GL_LIGHTING);
+    glPopMatrix();
+}
+
+void drawEnvironment() {
+    drawSky();
+    drawSun();
+    drawGround();
+    drawPath();
+    for (auto& cloud : clouds) drawCloud(cloud);
+    for (auto& tree : trees) drawTree(tree);
+    for (auto& house : houses) drawHouse(house);
+}
+
+void initEnvironment() {
+    srand(time(NULL));
+    trees.clear();
+    for (int i = 0; i < NUM_TREES; i++) {
+        Tree tree;
+        tree.x = -30 + (rand() % 60);
+        tree.z = -30 + (rand() % 60);
+        tree.y = 0;
+        while ((tree.x > -5 && tree.x < 5) ||
+               (tree.x > -12 && tree.x < 12 && tree.z > -35 && tree.z < 30)) {
+            tree.x = -30 + (rand() % 60);
+            tree.z = -30 + (rand() % 60);
+        }
+        tree.height = 5 + (rand() % 5);
+        tree.trunkRadius = 0.3f + (rand() % 3) / 10.0f;
+        tree.foliageRadius = 2.0f + (rand() % 20) / 10.0f;
+        tree.swayOffset = (rand() % 100) / 10.0f;
+        tree.r = 0.1f + (rand() % 30) / 100.0f;
+        tree.g = 0.4f + (rand() % 40) / 100.0f;
+        tree.b = 0.1f + (rand() % 20) / 100.0f;
+        trees.push_back(tree);
+    }
+
+    clouds.clear();
+    for (int i = 0; i < NUM_CLOUDS; i++) {
+        Cloud cloud;
+        cloud.x = -50 + (rand() % 100);
+        cloud.y = 30 + (rand() % 20);
+        cloud.z = -50 + (rand() % 100);
+        cloud.width = 3 + (rand() % 4);
+        cloud.height = 2 + (rand() % 2);
+        cloud.depth = 3 + (rand() % 3);
+        cloud.speed = 0.5f + (rand() % 10) / 10.0f;
+        cloud.r = 0.9f; cloud.g = 0.9f; cloud.b = 0.95f;
+        cloud.alpha = 0.7f + (rand() % 30) / 100.0f;
+        clouds.push_back(cloud);
+    }
+
+    houses.clear();
+    float housePositions[][2] = {
+        {-8, -20}, {8, -10}, {-10, 5}, {9, 15}, {-9, 25}, {8, -30}
+    };
+    const char* ownerNames[] = {"A H A N A F", "A V I S H E K", "A D I L", "I R T I S U M", "T A", "S I R"};
+    for (int i = 0; i < NUM_HOUSES; i++) {
+        House house;
+        house.x = housePositions[i][0];
+        house.z = housePositions[i][1];
+        house.y = 0;
+        house.width = 3.5f + (rand() % 3);
+        house.height = 3.5f + (rand() % 4);
+        house.depth = 3.5f + (rand() % 3);
+        house.roofHeight = 2 + (rand() % 3);
+        house.ownerName = ownerNames[i];
+        houses.push_back(house);
+    }
+}
+
+void updateCamera() {
+    glLoadIdentity();
+    float camX = cameraDistance * cosf(cameraAngle * 0.0174533f);
+    float camZ = cameraDistance * sinf(cameraAngle * 0.0174533f);
+    gluLookAt(camX, cameraHeight, camZ, 0, 5, 0, 0, 1, 0);
+}
+
+
+
+// adil - Weather Particle Systems, Lightning, Physics
+
+
+void drawRain() {
+    if (currentWeather != RAINY && (targetWeather != RAINY || weatherTransition < 0.3f)) return;
+    glDisable(GL_LIGHTING);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glLineWidth(1.5f);
+    float alpha = (currentWeather == RAINY) ? 1.0f : (weatherTransition - 0.3f) / 0.7f;
+    for (auto& drop : raindrops) {
+        glColor4f(0.7f, 0.8f, 1.0f, drop.alpha * alpha);
+        glBegin(GL_LINES);
+        glVertex3f(drop.x, drop.y, drop.z);
+        glVertex3f(drop.x, drop.y - drop.length, drop.z);
+        glEnd();
+    }
+    glLineWidth(1.0f);
+    glDisable(GL_BLEND);
+    glEnable(GL_LIGHTING);
+}
+
+void drawSnow() {
+    if (currentWeather != WINTER && (targetWeather != WINTER || weatherTransition < 0.3f)) return;
+    glDisable(GL_LIGHTING);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    float alpha = (currentWeather == WINTER) ? 1.0f : (weatherTransition - 0.3f) / 0.7f;
+    for (auto& flake : snowflakes) {
+        glPushMatrix();
+        glTranslatef(flake.x, flake.y, flake.z);
+        glRotatef(flake.rotation, 0, 1, 0);
+        glColor4f(1.0f, 1.0f, 1.0f, alpha);
+        glBegin(GL_LINES);
+        for (int i = 0; i < 6; i++) {
+            float angle = i * 60.0f * 0.0174533f;
+            float x1 = cosf(angle) * flake.size;
+            float z1 = sinf(angle) * flake.size;
+            glVertex3f(0, 0, 0);
+            glVertex3f(x1, 0, z1);
+        }
+        glEnd();
+        glPopMatrix();
+    }
+    glDisable(GL_BLEND);
+    glEnable(GL_LIGHTING);
+}
+
+void drawLightning() {
+    if (!lightning.active) return;
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glLineWidth(3.0f);
+    glColor4f(1.0f, 1.0f, 0.8f, lightning.intensity);
+    glBegin(GL_LINE_STRIP);
+    for (int i = 0; i < lightning.segments; i++) {
+        glVertex3f(lightning.points[i][0], lightning.points[i][1], -20);
+    }
+    glEnd();
+    glLineWidth(6.0f);
+    glColor4f(0.7f, 0.8f, 1.0f, lightning.intensity * 0.5f);
+    glBegin(GL_LINE_STRIP);
+    for (int i = 0; i < lightning.segments; i++) {
+        glVertex3f(lightning.points[i][0], lightning.points[i][1], -20);
+    }
+    glEnd();
+    glLineWidth(1.0f);
+    glDisable(GL_BLEND);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_LIGHTING);
+}
+
+void drawFogEffect() {
+    if (currentWeather != FOG && (targetWeather != FOG || weatherTransition < 0.3f)) return;
+    glDisable(GL_LIGHTING);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    float alpha = (currentWeather == FOG) ? 0.3f : (weatherTransition - 0.3f) / 0.7f * 0.3f;
+    for (auto& particle : fogParticles) {
+        glPushMatrix();
+        glTranslatef(particle.x, particle.y, particle.z);
+        glColor4f(0.8f, 0.85f, 0.9f, particle.alpha * alpha);
+        glutSolidSphere(particle.size, 8, 8);
+        glPopMatrix();
+    }
+    glDisable(GL_BLEND);
+    glEnable(GL_LIGHTING);
+}
+
+void updateRain() {
+    for (auto& drop : raindrops) {
+        drop.y -= drop.velocityY;
+        if (drop.y < 0) {
+            drop.y = 50 + (rand() % 30);
+            drop.x = -40 + (rand() % 80);
+            drop.z = -40 + (rand() % 80);
+        }
+    }
+}
+
+void updateSnow() {
+    for (auto& flake : snowflakes) {
+        flake.y -= flake.velocityY;
+        flake.x += flake.driftX * sinf(globalTime + flake.y);
+        flake.rotation += flake.rotationSpeed;
+        if (flake.y < 0) {
+            flake.y = 50 + (rand() % 30);
+            flake.x = -40 + (rand() % 80);
+            flake.z = -40 + (rand() % 80);
+        }
+    }
+}
+
+void updateLightning() {
+    if (currentWeather == STORM || targetWeather == STORM) {
+        thunderTimer += 0.016f;
+        if (lightning.active) {
+            lightning.duration -= 0.016f;
+            lightning.intensity -= 0.05f;
+            if (lightning.duration <= 0 || lightning.intensity <= 0) {
+                lightning.active = false;
+            }
+        } else if (thunderTimer >= nextThunderTime) {
+            lightning.active = true;
+            lightning.duration = 0.2f + (rand() % 10) / 50.0f;
+            lightning.intensity = 1.0f;
+            thunderTimer = 0.0f;
+            nextThunderTime = 2.0f + (rand() % 40) / 10.0f;
+            lightning.segments = 8 + rand() % 5;
+            lightning.points[0][0] = -10 + (rand() % 20);
+            lightning.points[0][1] = 50;
+            for (int i = 1; i < lightning.segments; i++) {
+                lightning.points[i][0] = lightning.points[i-1][0] + (-2 + rand() % 5);
+                lightning.points[i][1] = lightning.points[i-1][1] - (3 + rand() % 4);
+            }
+        }
+    }
+}
+
+void updateFog() {
+    for (auto& particle : fogParticles) {
+        particle.x += particle.velocityX;
+        if (particle.x > 50) particle.x = -50;
+        if (particle.x < -50) particle.x = 50;
+    }
+}
+
+
+
+// avishek - UI, Buttons, Splash Screen, Event Handling, Animation
+
+
+void drawText(float x, float y, const char* text, void* font) {
+    glRasterPos2f(x, y);
+    for (const char* c = text; *c != '\0'; c++) {
+        glutBitmapCharacter(font, *c);
+    }
+}
+
+void drawSplashScreen() {
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    gluOrtho2D(0, 800, 0, 600);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+    glBegin(GL_QUADS);
+    glColor3f(0.05f, 0.1f, 0.2f);
+    glVertex2f(0, 0);
+    glVertex2f(800, 0);
+    glColor3f(0.1f, 0.2f, 0.4f);
+    glVertex2f(800, 600);
+    glVertex2f(0, 600);
+    glEnd();
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(0.15f, 0.25f, 0.35f, 0.9f);
+    glBegin(GL_QUADS);
+    glVertex2f(50, 400);
+    glVertex2f(750, 400);
+    glVertex2f(750, 550);
+    glVertex2f(50, 550);
+    glEnd();
+    glDisable(GL_BLEND);
+    glColor3f(0.3f, 0.7f, 1.0f);
+    glLineWidth(3.0f);
+    glBegin(GL_LINE_LOOP);
+    glVertex2f(50, 400);
+    glVertex2f(750, 400);
+    glVertex2f(750, 550);
+    glVertex2f(50, 550);
+    glEnd();
+    glLineWidth(1.0f);
+    glColor3f(1.0f, 1.0f, 0.3f);
+    drawText(180, 520, "INTERACTIVE WEATHER VISUALIZER", (void*)GLUT_BITMAP_TIMES_ROMAN_24);
+    glColor3f(0.7f, 0.9f, 1.0f);
+    drawText(260, 490, "Computer Graphics Lab Project", GLUT_BITMAP_HELVETICA_18);
+    glEnable(GL_BLEND);
+    glColor4f(0.15f, 0.25f, 0.35f, 0.9f);
+    glBegin(GL_QUADS);
+    glVertex2f(50, 50);
+    glVertex2f(750, 50);
+    glVertex2f(750, 370);
+    glVertex2f(50, 370);
+    glEnd();
+    glDisable(GL_BLEND);
+    glColor3f(1.0f, 0.84f, 0.0f);
+    glLineWidth(3.0f);
+    glBegin(GL_LINE_LOOP);
+    glVertex2f(50, 50);
+    glVertex2f(750, 50);
+    glVertex2f(750, 370);
+    glVertex2f(50, 370);
+    glEnd();
+    glLineWidth(1.0f);
+    glColor3f(1.0f, 0.9f, 0.3f);
+    drawText(320, 340, "PROJECT TEAM", GLUT_BITMAP_HELVETICA_18);
+    glColor3f(1.0f, 0.9f, 0.0f);
+    drawText(280, 270, "AHANAF (Team Leader)", GLUT_BITMAP_HELVETICA_18);
+    glColor3f(0.3f, 1.0f, 0.5f);
+    drawText(340, 220, "ADIL", GLUT_BITMAP_HELVETICA_18);
+    glColor3f(1.0f, 0.5f, 0.9f);
+    drawText(325, 170, "AVISHEK", GLUT_BITMAP_HELVETICA_18);
+    glColor3f(0.5f, 0.7f, 1.0f);
+    drawText(325, 120, "IRTISUM", GLUT_BITMAP_HELVETICA_18);
+    float pulse = 0.5f + 0.5f * sinf(globalTime * 3.0f);
+    glColor3f(pulse, pulse, 1.0f);
+    drawText(250, 25, ">>> CLICK ANYWHERE TO START <<<", GLUT_BITMAP_HELVETICA_18);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_LIGHTING);
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+}
+
+void drawUI() {
+    if (!showUI) return;
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    gluOrtho2D(0, 800, 0, 600);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_FOG);
+    glColor3f(1.0f, 1.0f, 1.0f);
+
+    if (showTeamNames) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glColor4f(0.1f, 0.1f, 0.15f, 0.85f);
+        glBegin(GL_QUADS);
+        glVertex2f(10, 528); glVertex2f(790, 528);
+        glVertex2f(790, 570); glVertex2f(10, 570);
+        glEnd();
+        glDisable(GL_BLEND);
+        glColor3f(1.0f, 0.84f, 0.0f);
+        glLineWidth(2.0f);
+        glBegin(GL_LINE_LOOP);
+        glVertex2f(10, 528); glVertex2f(790, 528);
+        glVertex2f(790, 570); glVertex2f(10, 570);
+        glEnd();
+        glLineWidth(1.0f);
+        glColor3f(1.0f, 0.9f, 0.0f);
+        drawText(80, 545, "AHANAF (Team Leader)", GLUT_BITMAP_HELVETICA_18);
+        glColor3f(0.3f, 1.0f, 0.5f);
+        drawText(330, 545, "ADIL", GLUT_BITMAP_HELVETICA_18);
+        glColor3f(1.0f, 0.5f, 0.9f);
+        drawText(480, 545, "AVISHEK", GLUT_BITMAP_HELVETICA_18);
+        glColor3f(0.5f, 0.7f, 1.0f);
+        drawText(640, 545, "IRTISUM", GLUT_BITMAP_HELVETICA_18);
+    }
+
+    for (auto& button : uiButtons) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        if (button.weather == currentWeather) {
+            glColor4f(0.2f, 0.7f, 1.0f, 0.9f);
+        } else if (button.hovered) {
+            glColor4f(0.5f, 0.5f, 0.5f, 0.8f);
+        } else {
+            glColor4f(0.25f, 0.25f, 0.3f, 0.75f);
+        }
+        glBegin(GL_QUADS);
+        glVertex2f(button.x, button.y);
+        glVertex2f(button.x + button.width, button.y);
+        glVertex2f(button.x + button.width, button.y + button.height);
+        glVertex2f(button.x, button.y + button.height);
+        glEnd();
+        glDisable(GL_BLEND);
+        if (button.weather == currentWeather) {
+            glColor3f(0.4f, 0.9f, 1.0f);
+            glLineWidth(3.0f);
+        } else {
+            glColor3f(0.6f, 0.6f, 0.6f);
+            glLineWidth(1.5f);
+        }
+        glBegin(GL_LINE_LOOP);
+        glVertex2f(button.x, button.y);
+        glVertex2f(button.x + button.width, button.y);
+        glVertex2f(button.x + button.width, button.y + button.height);
+        glVertex2f(button.x, button.y + button.height);
+        glEnd();
+        glLineWidth(1.0f);
+        if (button.weather == currentWeather) {
+            glColor3f(1.0f, 1.0f, 0.0f);
+        } else {
+            glColor3f(1.0f, 1.0f, 1.0f);
+        }
+        drawText(button.x + 30, button.y + 8, button.label, GLUT_BITMAP_HELVETICA_18);
+    }
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(0.05f, 0.05f, 0.1f, 0.8f);
+    glBegin(GL_QUADS);
+    glVertex2f(10, 10); glVertex2f(390, 10);
+    glVertex2f(390, 110); glVertex2f(10, 110);
+    glEnd();
+    glDisable(GL_BLEND);
+    glColor3f(0.5f, 0.9f, 1.0f);
+    glLineWidth(2.0f);
+    glBegin(GL_LINE_LOOP);
+    glVertex2f(10, 10); glVertex2f(390, 10);
+    glVertex2f(390, 110); glVertex2f(10, 110);
+    glEnd();
+    glLineWidth(1.0f);
+    glColor3f(1.0f, 0.9f, 0.3f);
+    drawText(20, 95, "CONTROLS:", GLUT_BITMAP_HELVETICA_12);
+    glColor3f(0.95f, 0.95f, 0.95f);
+    drawText(20, 78, "Mouse: Click & Drag to rotate camera view");
+    drawText(20, 63, "Mouse Wheel: Zoom in/out  |  Click buttons for weather");
+    drawText(20, 48, "Arrow Keys: Rotate camera  |  U: Toggle UI");
+    drawText(20, 33, "T: Toggle Team Names  |  N: Day/Night Toggle");
+    drawText(20, 18, "1-5: Quick Weather Select  |  R: Reset  |  ESC: Exit");
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(0.05f, 0.05f, 0.1f, 0.8f);
+    glBegin(GL_QUADS);
+    glVertex2f(410, 10); glVertex2f(790, 10);
+    glVertex2f(790, 110); glVertex2f(410, 110);
+    glEnd();
+    glDisable(GL_BLEND);
+    glColor3f(1.0f, 0.84f, 0.0f);
+    glLineWidth(2.0f);
+    glBegin(GL_LINE_LOOP);
+    glVertex2f(410, 10); glVertex2f(790, 10);
+    glVertex2f(790, 110); glVertex2f(410, 110);
+    glEnd();
+    glLineWidth(1.0f);
+    glColor3f(1.0f, 0.9f, 0.3f);
+    drawText(420, 95, "STATUS:", GLUT_BITMAP_HELVETICA_12);
+    const char* weatherNames[] = {"Sunny", "Rainy", "Storm", "Winter", "Fog"};
+    char infoText[100];
+    glColor3f(0.6f, 1.0f, 0.9f);
+    sprintf(infoText, "Current Weather: %s", weatherNames[currentWeather]);
+    drawText(420, 78, infoText, GLUT_BITMAP_HELVETICA_12);
+    sprintf(infoText, "Time of Day: %s", isDayTime ? "DAY" : "NIGHT");
+    drawText(420, 63, infoText, GLUT_BITMAP_HELVETICA_12);
+    sprintf(infoText, "Team Names Display: %s", showTeamNames ? "ON" : "OFF");
+    drawText(420, 48, infoText, GLUT_BITMAP_HELVETICA_12);
+    glColor3f(1.0f, 0.84f, 0.0f);
+    drawText(420, 33, "Project Leader: AHANAF", GLUT_BITMAP_HELVETICA_12);
+    glColor3f(0.8f, 0.8f, 0.8f);
+    drawText(420, 18, "Computer Graphics Lab Final Project", GLUT_BITMAP_HELVETICA_10);
+
+    glDisable(GL_BLEND);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_LIGHTING);
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+}
+
+void updateAnimations() {
+    if (currentWeather == STORM || targetWeather == STORM) {
+        animation.windStrength = 1.5f + sinf(globalTime * 2) * 0.5f;
+    } else if (currentWeather == RAINY || targetWeather == RAINY) {
+        animation.windStrength = 0.8f + sinf(globalTime) * 0.3f;
+    } else if (currentWeather == WINTER || targetWeather == WINTER) {
+        animation.windStrength = 0.5f + sinf(globalTime * 0.5f) * 0.2f;
+    } else {
+        animation.windStrength = 0.2f + sinf(globalTime * 0.3f) * 0.1f;
+    }
+
+    for (auto& cloud : clouds) {
+        cloud.x += cloud.speed * animation.windStrength * 0.1f;
+        if (cloud.x > 60) cloud.x = -60;
+        if (cloud.x < -60) cloud.x = 60;
+    }
+
+    if (currentWeather != targetWeather) {
+        weatherTransition += 0.01f;
+        if (weatherTransition >= 1.0f) {
+            weatherTransition = 1.0f;
+            currentWeather = targetWeather;
+            currentLighting = targetLighting;
+        }
+    }
+}
+
+void keyboard(unsigned char key, int x, int y) {
+    switch(key) {
+        case 'u': case 'U': showUI = !showUI; break;
+        case 't': case 'T': showTeamNames = !showTeamNames; break;
+        case 'n': case 'N':
+            isDayTime = !isDayTime;
+            timeOfDay = isDayTime ? 0.5f : 0.0f;
+            // Update lighting for current weather type
+            switch(currentWeather) {
+                case SUNNY: currentLighting = getSunnyLighting(); targetLighting = currentLighting; break;
+                case RAINY: currentLighting = getRainyLighting(); targetLighting = currentLighting; break;
+                case STORM: currentLighting = getStormLighting(); targetLighting = currentLighting; break;
+                case WINTER: currentLighting = getWinterLighting(); targetLighting = currentLighting; break;
+                case FOG: currentLighting = getFogLighting(); targetLighting = currentLighting; break;
+            }
+            break;
+        case 'r': case 'R':
+            cameraAngle = 45.0f;
+            cameraHeight = 15.0f;
+            cameraDistance = 40.0f;
+            break;
+        case '1': targetWeather = SUNNY; targetLighting = getSunnyLighting(); weatherTransition = 0.0f; break;
+        case '2': targetWeather = RAINY; targetLighting = getRainyLighting(); weatherTransition = 0.0f; break;
+        case '3': targetWeather = STORM; targetLighting = getStormLighting(); weatherTransition = 0.0f; break;
+        case '4': targetWeather = WINTER; targetLighting = getWinterLighting(); weatherTransition = 0.0f; break;
+        case '5': targetWeather = FOG; targetLighting = getFogLighting(); weatherTransition = 0.0f; break;
+        case 27: exit(0); break;
+    }
+    glutPostRedisplay();
+}
+
+void specialKeys(int key, int x, int y) {
+    switch(key) {
+        case GLUT_KEY_LEFT: cameraAngle -= 3; break;
+        case GLUT_KEY_RIGHT: cameraAngle += 3; break;
+        case GLUT_KEY_UP: cameraHeight += 1; break;
+        case GLUT_KEY_DOWN: cameraHeight -= 1; break;
+    }
+    glutPostRedisplay();
+}
+
+void mouse(int button, int state, int x, int y) {
+    if (showSplashScreen && button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
+        showSplashScreen = false;
+        return;
+    }
+    if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
+        int windowHeight = 600;
+        int uiY = windowHeight - y;
+        bool clickedButton = false;
+        for (auto& btn : uiButtons) {
+            if (x >= btn.x && x <= btn.x + btn.width && uiY >= btn.y && uiY <= btn.y + btn.height) {
+                targetWeather = btn.weather;
+                weatherTransition = 0.0f;
+                clickedButton = true;
+                switch(btn.weather) {
+                    case SUNNY: targetLighting = getSunnyLighting(); break;
+                    case RAINY: targetLighting = getRainyLighting(); break;
+                    case STORM: targetLighting = getStormLighting(); break;
+                    case WINTER: targetLighting = getWinterLighting(); break;
+                    case FOG: targetLighting = getFogLighting(); break;
+                }
+            }
+        }
+        // Start dragging if not clicking a button
+        if (!clickedButton) {
+            isDragging = true;
+            lastMouseX = x;
+            lastMouseY = y;
+        }
+    }
+    if (button == GLUT_LEFT_BUTTON && state == GLUT_UP) {
+        isDragging = false;
+    }
+    // Mouse wheel for zoom
+    if (button == 3) { // Scroll up
+        cameraDistance -= 2.0f;
+        if (cameraDistance < 10.0f) cameraDistance = 10.0f;
+        glutPostRedisplay();
+    }
+    if (button == 4) { // Scroll down
+        cameraDistance += 2.0f;
+        if (cameraDistance > 80.0f) cameraDistance = 80.0f;
+        glutPostRedisplay();
+    }
+}
+
+void motion(int x, int y) {
+    if (isDragging && !showSplashScreen) {
+        // Calculate mouse movement
+        int deltaX = x - lastMouseX;
+        int deltaY = y - lastMouseY;
+
+        // Update camera angle based on horizontal mouse movement
+        cameraAngle += deltaX * 0.5f;
+
+        // Update camera height based on vertical mouse movement
+        cameraHeight -= deltaY * 0.1f;
+        if (cameraHeight < 5.0f) cameraHeight = 5.0f;
+        if (cameraHeight > 50.0f) cameraHeight = 50.0f;
+
+        // Update last mouse position
+        lastMouseX = x;
+        lastMouseY = y;
+
+        glutPostRedisplay();
+        return;
+    }
+
+    mouseX = x;
+    mouseY = y;
+    int windowHeight = 600;
+    int uiY = windowHeight - y;
+    for (auto& btn : uiButtons) {
+        btn.hovered = (x >= btn.x && x <= btn.x + btn.width && uiY >= btn.y && uiY <= btn.y + btn.height);
+    }
+    glutPostRedisplay();
+}
+
+
+
+// irtisum - Dynamic Lighting, Day/Night System, Sun/Moon Rendering
+
+LightingState getSunnyLighting() {
+    LightingState light;
+    if (!isDayTime) {
+        light.ambientR = 0.15f; light.ambientG = 0.15f; light.ambientB = 0.25f;
+        light.diffuseR = 0.2f; light.diffuseG = 0.2f; light.diffuseB = 0.4f;
+        light.sunPosX = 30.0f; light.sunPosY = -20.0f; light.sunPosZ = 20.0f;
+        light.skyR = 0.05f; light.skyG = 0.05f; light.skyB = 0.15f;
+        light.groundR = 0.05f; light.groundG = 0.15f; light.groundB = 0.05f;
+    } else if (timeOfDay < 0.25f || timeOfDay > 0.75f) {
+        float sunsetFactor = (timeOfDay < 0.25f) ? (timeOfDay / 0.25f) : ((1.0f - timeOfDay) / 0.25f);
+        light.ambientR = 0.4f + 0.2f * sunsetFactor;
+        light.ambientG = 0.3f + 0.3f * sunsetFactor;
+        light.ambientB = 0.2f + 0.4f * sunsetFactor;
+        light.diffuseR = 1.0f;
+        light.diffuseG = 0.6f + 0.4f * sunsetFactor;
+        light.diffuseB = 0.4f + 0.5f * sunsetFactor;
+        light.sunPosX = 30.0f; light.sunPosY = 20.0f + 30.0f * sunsetFactor; light.sunPosZ = 20.0f;
+        light.skyR = 0.8f; light.skyG = 0.4f + 0.4f * sunsetFactor; light.skyB = 0.3f + 0.7f * sunsetFactor;
+        light.groundR = 0.2f; light.groundG = 0.5f + 0.2f * sunsetFactor; light.groundB = 0.2f;
+    } else {
+        light.ambientR = 0.6f; light.ambientG = 0.6f; light.ambientB = 0.6f;
+        light.diffuseR = 1.0f; light.diffuseG = 1.0f; light.diffuseB = 0.9f;
+        light.sunPosX = 30.0f; light.sunPosY = 50.0f; light.sunPosZ = 20.0f;
+        light.skyR = 0.53f; light.skyG = 0.81f; light.skyB = 0.98f;
+        light.groundR = 0.2f; light.groundG = 0.7f; light.groundB = 0.2f;
+    }
+    light.fogDensity = 0.0f;
+    return light;
+}
+
+LightingState getRainyLighting() {
+    LightingState light;
+    if (!isDayTime) {
+        light.ambientR = 0.1f; light.ambientG = 0.12f; light.ambientB = 0.18f;
+        light.diffuseR = 0.15f; light.diffuseG = 0.17f; light.diffuseB = 0.25f;
+        light.sunPosX = 20.0f; light.sunPosY = -20.0f; light.sunPosZ = 15.0f;
+        light.skyR = 0.05f; light.skyG = 0.07f; light.skyB = 0.12f;
+        light.groundR = 0.05f; light.groundG = 0.12f; light.groundB = 0.05f;
+    } else {
+        light.ambientR = 0.3f; light.ambientG = 0.35f; light.ambientB = 0.4f;
+        light.diffuseR = 0.5f; light.diffuseG = 0.55f; light.diffuseB = 0.6f;
+        light.sunPosX = 20.0f; light.sunPosY = 40.0f; light.sunPosZ = 15.0f;
+        light.skyR = 0.4f; light.skyG = 0.45f; light.skyB = 0.5f;
+        light.groundR = 0.15f; light.groundG = 0.4f; light.groundB = 0.15f;
+    }
+    light.fogDensity = 0.02f;
+    return light;
+}
+
+LightingState getStormLighting() {
+    LightingState light;
+    if (!isDayTime) {
+        light.ambientR = 0.05f; light.ambientG = 0.05f; light.ambientB = 0.1f;
+        light.diffuseR = 0.1f; light.diffuseG = 0.1f; light.diffuseB = 0.2f;
+        light.sunPosX = 15.0f; light.sunPosY = -20.0f; light.sunPosZ = 10.0f;
+        light.skyR = 0.02f; light.skyG = 0.02f; light.skyB = 0.08f;
+        light.groundR = 0.03f; light.groundG = 0.08f; light.groundB = 0.03f;
+    } else {
+        light.ambientR = 0.15f; light.ambientG = 0.15f; light.ambientB = 0.2f;
+        light.diffuseR = 0.3f; light.diffuseG = 0.3f; light.diffuseB = 0.4f;
+        light.sunPosX = 15.0f; light.sunPosY = 30.0f; light.sunPosZ = 10.0f;
+        light.skyR = 0.2f; light.skyG = 0.2f; light.skyB = 0.3f;
+        light.groundR = 0.1f; light.groundG = 0.3f; light.groundB = 0.1f;
+    }
+    light.fogDensity = 0.03f;
+    return light;
+}
+
+LightingState getWinterLighting() {
+    LightingState light;
+    if (!isDayTime) {
+        light.ambientR = 0.2f; light.ambientG = 0.22f; light.ambientB = 0.3f;
+        light.diffuseR = 0.3f; light.diffuseG = 0.32f; light.diffuseB = 0.45f;
+        light.sunPosX = 25.0f; light.sunPosY = -20.0f; light.sunPosZ = 18.0f;
+        light.skyR = 0.08f; light.skyG = 0.1f; light.skyB = 0.2f;
+        light.groundR = 0.4f; light.groundG = 0.42f; light.groundB = 0.5f;
+    } else {
+        light.ambientR = 0.7f; light.ambientG = 0.75f; light.ambientB = 0.85f;
+        light.diffuseR = 0.9f; light.diffuseG = 0.95f; light.diffuseB = 1.0f;
+        light.sunPosX = 25.0f; light.sunPosY = 45.0f; light.sunPosZ = 18.0f;
+        light.skyR = 0.7f; light.skyG = 0.8f; light.skyB = 0.9f;
+        light.groundR = 0.9f; light.groundG = 0.9f; light.groundB = 0.95f;
+    }
+    light.fogDensity = 0.01f;
+    return light;
+}
+
+LightingState getFogLighting() {
+    LightingState light;
+    if (!isDayTime) {
+        light.ambientR = 0.15f; light.ambientG = 0.15f; light.ambientB = 0.2f;
+        light.diffuseR = 0.2f; light.diffuseG = 0.2f; light.diffuseB = 0.3f;
+        light.sunPosX = 20.0f; light.sunPosY = -20.0f; light.sunPosZ = 12.0f;
+        light.skyR = 0.1f; light.skyG = 0.12f; light.skyB = 0.18f;
+        light.groundR = 0.08f; light.groundG = 0.18f; light.groundB = 0.08f;
+    } else {
+        light.ambientR = 0.5f; light.ambientG = 0.5f; light.ambientB = 0.52f;
+        light.diffuseR = 0.6f; light.diffuseG = 0.6f; light.diffuseB = 0.65f;
+        light.sunPosX = 20.0f; light.sunPosY = 35.0f; light.sunPosZ = 12.0f;
+        light.skyR = 0.65f; light.skyG = 0.67f; light.skyB = 0.7f;
+        light.groundR = 0.25f; light.groundG = 0.6f; light.groundB = 0.25f;
+    }
+    light.fogDensity = 0.03f;
+    return light;
+}
+
+void setupLighting() {
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_COLOR_MATERIAL);
+    glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+
+    LightingState light;
+    light.ambientR = lerp(currentLighting.ambientR, targetLighting.ambientR, weatherTransition);
+    light.ambientG = lerp(currentLighting.ambientG, targetLighting.ambientG, weatherTransition);
+    light.ambientB = lerp(currentLighting.ambientB, targetLighting.ambientB, weatherTransition);
+    light.diffuseR = lerp(currentLighting.diffuseR, targetLighting.diffuseR, weatherTransition);
+    light.diffuseG = lerp(currentLighting.diffuseG, targetLighting.diffuseG, weatherTransition);
+    light.diffuseB = lerp(currentLighting.diffuseB, targetLighting.diffuseB, weatherTransition);
+    light.sunPosX = lerp(currentLighting.sunPosX, targetLighting.sunPosX, weatherTransition);
+    light.sunPosY = lerp(currentLighting.sunPosY, targetLighting.sunPosY, weatherTransition);
+    light.sunPosZ = lerp(currentLighting.sunPosZ, targetLighting.sunPosZ, weatherTransition);
+
+    GLfloat light_ambient[] = { light.ambientR, light.ambientG, light.ambientB, 1.0f };
+    GLfloat light_diffuse[] = { light.diffuseR, light.diffuseG, light.diffuseB, 1.0f };
+    GLfloat light_position[] = { light.sunPosX, light.sunPosY, light.sunPosZ, 1.0f };
+
+    glLightfv(GL_LIGHT0, GL_AMBIENT, light_ambient);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, light_diffuse);
+    glLightfv(GL_LIGHT0, GL_POSITION, light_position);
+
+    float fogDensity = lerp(currentLighting.fogDensity, targetLighting.fogDensity, weatherTransition);
+    if (fogDensity > 0.001f) {
+        glEnable(GL_FOG);
+        GLfloat fogColor[] = {
+            lerp(currentLighting.skyR, targetLighting.skyR, weatherTransition),
+            lerp(currentLighting.skyG, targetLighting.skyG, weatherTransition),
+            lerp(currentLighting.skyB, targetLighting.skyB, weatherTransition),
+            1.0f
+        };
+        glFogfv(GL_FOG_COLOR, fogColor);
+        glFogf(GL_FOG_DENSITY, fogDensity);
+        glFogi(GL_FOG_MODE, GL_EXP2);
+    } else {
+        glDisable(GL_FOG);
+    }
+}
+
+
+// ahanaf - Main Integration (Display Loop, Update Loop, Initialization)
+
+
+void display() {
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    if (showSplashScreen) {
+        drawSplashScreen();
+    } else {
+        glMatrixMode(GL_MODELVIEW);
+        updateCamera();
+        setupLighting();
+        drawEnvironment();
+        drawRain();
+        drawSnow();
+        drawLightning();
+        drawFogEffect();
+        drawUI();
+    }
+
+    glutSwapBuffers();
+}
+
+void update(int value) {
+    globalTime += 0.016f;
+    updateAnimations();
+    updateRain();
+    updateSnow();
+    updateLightning();
+    updateFog();
+    glutPostRedisplay();
+    glutTimerFunc(16, update, 0);
+}
+
+void init() {
+    glClearColor(0.53f, 0.81f, 0.98f, 1.0f);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_NORMALIZE);
+    glShadeModel(GL_SMOOTH);
+    glEnable(GL_LINE_SMOOTH);
+    glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    gluPerspective(60.0, 800.0/600.0, 0.1, 200.0);
+    glMatrixMode(GL_MODELVIEW);
+
+    initEnvironment();
+
+    raindrops.clear();
+    for (int i = 0; i < MAX_RAINDROPS; i++) {
+        Raindrop drop;
+        drop.x = -40 + (rand() % 80);
+        drop.y = rand() % 50;
+        drop.z = -40 + (rand() % 80);
+        drop.velocityY = 0.8f + (rand() % 10) / 10.0f;
+        drop.length = 0.5f + (rand() % 10) / 10.0f;
+        drop.alpha = 0.4f + (rand() % 40) / 100.0f;
+        raindrops.push_back(drop);
+    }
+
+    snowflakes.clear();
+    for (int i = 0; i < MAX_SNOWFLAKES; i++) {
+        Snowflake flake;
+        flake.x = -40 + (rand() % 80);
+        flake.y = rand() % 50;
+        flake.z = -40 + (rand() % 80);
+        flake.velocityY = 0.1f + (rand() % 10) / 100.0f;
+        flake.rotation = rand() % 360;
+        flake.rotationSpeed = 1.0f + (rand() % 30) / 10.0f;
+        flake.size = 0.1f + (rand() % 10) / 50.0f;
+        flake.driftX = 0.05f + (rand() % 10) / 100.0f;
+        snowflakes.push_back(flake);
+    }
+
+    fogParticles.clear();
+    for (int i = 0; i < MAX_FOG_PARTICLES; i++) {
+        FogParticle particle;
+        particle.x = -50 + (rand() % 100);
+        particle.y = (rand() % 20);
+        particle.z = -50 + (rand() % 100);
+        particle.velocityX = 0.02f + (rand() % 10) / 100.0f;
+        particle.alpha = 0.02f + (rand() % 5) / 100.0f;
+        particle.size = 0.8f + (rand() % 10) / 10.0f;
+        fogParticles.push_back(particle);
+    }
+
+    uiButtons.clear();
+    const char* labels[] = {"Sunny", "Rainy", "Storm", "Winter", "Fog"};
+    for (int i = 0; i < 5; i++) {
+        UIButton button;
+        button.x = 45 + i * 145;
+        button.y = 498;
+        button.width = 130;
+        button.height = 25;
+        button.label = labels[i];
+        button.weather = (WeatherType)i;
+        button.hovered = false;
+        uiButtons.push_back(button);
+    }
+
+    lightning.active = false;
+    lightning.duration = 0;
+    lightning.intensity = 0;
+    animation.windStrength = 0.2f;
+    animation.windDirection = 0.0f;
+    animation.timeScale = 1.0f;
+    currentLighting = getSunnyLighting();
+    targetLighting = currentLighting;
+}
+
+int main(int argc, char** argv) {
+    glutInit(&argc, argv);
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
+    glutInitWindowSize(800, 600);
+    glutInitWindowPosition(100, 100);
+    glutCreateWindow("Interactive Weather Visualizer - Team Project | Click buttons to change weather!");
+    init();
+    glutDisplayFunc(display);
+    glutKeyboardFunc(keyboard);
+    glutSpecialFunc(specialKeys);
+    glutMouseFunc(mouse);
+    glutMotionFunc(motion);
+    glutPassiveMotionFunc(motion);
+    glutTimerFunc(0, update, 0);
+    glutMainLoop();
+    return 0;
+}
