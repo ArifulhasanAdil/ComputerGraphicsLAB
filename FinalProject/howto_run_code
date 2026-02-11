@@ -2,6 +2,6 @@
 _____________________________________________
 Topic: Interactive Weather Visualizer
 ______________________________________________________________________________________
-To run the code in Codeblocks You need to setup graphics.h and minGW-32 in C++ library.
+# To run the code in Codeblocks You need to setup graphics.h and minGW-32 in C++ library.
 https://www.youtube.com/watch?app=desktop&v=7rLo69vCooU 
 You can watch this video link for GLUT setup in CODEBLOCKS or else you will not be able to run the code.
